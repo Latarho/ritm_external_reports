@@ -103,7 +103,7 @@ export function TeamReportActionsMenu({
           </DropdownMenuItem>
           <DropdownMenuItem onClick={toggleAccess}>
             {access === "open" ? <LockIcon /> : <LockOpenIcon />}
-            {access === "open" ? "Закрыть доступ" : "Открыть доступ"}
+            {access === "open" ? "Закрыть доступ руководителю" : "Открыть доступ руководителю"}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={duplicate}>
             <CopyIcon /> Создать копию

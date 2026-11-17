@@ -3,12 +3,27 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState, useTransition } from "react"
-import { PencilIcon } from "lucide-react"
 import { toast } from "sonner"
-import { AccessStatus } from "@/app/procedures/_components/access-status"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SimplePagination } from "@/components/simple-pagination"
 import { SortButton, compareValues, nextSort, type SortDir } from "@/components/sort-button"
-import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -17,33 +32,39 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { formatDate } from "@/lib/format"
-import type { TeamReportSummary } from "@/lib/types"
+import { ACCESS_LABELS } from "@/app/procedures/_components/access-status"
+import { formatLastChange } from "@/lib/format"
+import type { ReportAccess, TeamReportSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { setTeamReportAccessAction } from "./actions"
-import { TeamReportActionsMenu } from "./_components/team-report-actions-menu"
+import {
+  setTeamReportAccessAction,
+  type TeamReportAccessAudience,
+} from "./actions"
+import { EmailSentStatus } from "./_components/email-sent-status"
 
 const PAGE_SIZE = 10
 
-type SortKey = "name" | "procedureName" | "leaderName" | "memberCount" | "updatedAt"
+type SortKey = "name" | "leaderName" | "hrbpName" | "memberCount" | "updatedAt"
+
+const ACCESS_ITEMS = [
+  { value: "open", label: ACCESS_LABELS.open },
+  { value: "closed", label: ACCESS_LABELS.closed },
+] as const
 
 const COLUMNS: Array<{ label: string; sort?: SortKey; className?: string }> = [
   { label: "Название", sort: "name", className: "w-[18%]" },
-  { label: "Процедура", sort: "procedureName" },
+  { label: "Количество сотрудников", sort: "memberCount" },
   { label: "Руководитель", sort: "leaderName" },
-  { label: "Участников", sort: "memberCount" },
-  { label: "Доступ к отчёту", className: "w-40" },
+  { label: "Доступ для руководителя" },
+  { label: "Сотрудник ДРП", sort: "hrbpName" },
+  { label: "Доступ для сотрудника ДРП" },
   { label: "Создатель отчёта" },
   { label: "Последнее изменение", sort: "updatedAt" },
-  { label: "Действие", className: "w-24 text-center" },
 ]
 
 export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) {
-  const router = useRouter()
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null)
   const [page, setPage] = useState(1)
-  const [pending, startTransition] = useTransition()
 
   const sorted = useMemo(() => {
     if (!sort) return reports
@@ -54,16 +75,6 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
   const current = Math.min(page, pageCount)
   const rows = sorted.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE)
-
-  function toggleAccess(r: TeamReportSummary) {
-    startTransition(async () => {
-      const next = r.reportAccess === "open" ? "closed" : "open"
-      const res = await setTeamReportAccessAction(r.id, next)
-      if (!res.ok) return void toast.error(res.error)
-      toast.success(next === "open" ? "Доступ руководителю открыт" : "Доступ руководителю закрыт")
-      router.refresh()
-    })
-  }
 
   return (
     <div className="p-4 pt-3">
@@ -106,49 +117,30 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
                     {r.name}
                   </Link>
                 </TableCell>
-                <TableCell className="max-w-56 whitespace-normal">
-                  <Link href={`/procedures/${r.procedureId}`} className="hover:text-primary hover:underline">
-                    {r.procedureName}
-                  </Link>
-                </TableCell>
-                <TableCell>{r.leaderName}</TableCell>
                 <TableCell className="tabular-nums">{r.memberCount}</TableCell>
+                <TableCell className="max-w-44 whitespace-normal">{r.leaderName}</TableCell>
                 <TableCell>
-                  <div className="flex items-center justify-between gap-2">
-                    <AccessStatus access={r.reportAccess} />
-                    <button
-                      type="button"
-                      disabled={pending}
-                      className="text-primary hover:underline disabled:opacity-50"
-                      onClick={() => toggleAccess(r)}
-                    >
-                      {r.reportAccess === "open" ? "Закрыть" : "Открыть"}
-                    </button>
-                  </div>
+                  <AccessSelect
+                    reportId={r.id}
+                    access={r.reportAccess}
+                    emailSent={r.reportEmailSent}
+                    audience="leader"
+                    label="Доступ для руководителя"
+                  />
+                </TableCell>
+                <TableCell className="max-w-44 whitespace-normal">{r.hrbpName}</TableCell>
+                <TableCell>
+                  <AccessSelect
+                    reportId={r.id}
+                    access={r.hrbpReportAccess}
+                    emailSent={r.hrbpEmailSent}
+                    audience="hrbp"
+                    label="Доступ для сотрудника ДРП"
+                  />
                 </TableCell>
                 <TableCell>{r.creator}</TableCell>
-                <TableCell className="tabular-nums">{formatDate(r.updatedAt)}</TableCell>
-                <TableCell>
-                  <div className="flex items-center justify-center gap-1.5">
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            variant="secondary"
-                            size="icon-sm"
-                            className="text-primary"
-                            render={<Link href={`/team-reports/${r.id}`} />}
-                            nativeButton={false}
-                            aria-label={`Редактировать «${r.name}»`}
-                          />
-                        }
-                      >
-                        <PencilIcon />
-                      </TooltipTrigger>
-                      <TooltipContent>Редактировать</TooltipContent>
-                    </Tooltip>
-                    <TeamReportActionsMenu id={r.id} name={r.name} access={r.reportAccess} />
-                  </div>
+                <TableCell className="whitespace-nowrap tabular-nums">
+                  {formatLastChange(r.updatedAt, r.updatedBy)}
                 </TableCell>
               </TableRow>
             ))}
@@ -157,5 +149,120 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
       </div>
       <SimplePagination total={reports.length} page={current} pageCount={pageCount} onPageChange={setPage} />
     </div>
+  )
+}
+
+function AccessSelect({
+  reportId,
+  access,
+  emailSent,
+  audience,
+  label,
+}: {
+  reportId: string
+  access: Exclude<ReportAccess, null>
+  emailSent: boolean
+  audience: TeamReportAccessAudience
+  label: string
+}) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [pendingAccess, setPendingAccess] = useState<Exclude<ReportAccess, null> | null>(null)
+  const [sendEmail, setSendEmail] = useState(true)
+
+  function apply(next: Exclude<ReportAccess, null>, withEmail: boolean) {
+    startTransition(async () => {
+      const res = await setTeamReportAccessAction(reportId, next, audience, {
+        sendEmail: withEmail,
+      })
+      setPendingAccess(null)
+      if (!res.ok) return void toast.error(res.error)
+      const opened = next === "open"
+      toast.success(
+        audience === "hrbp"
+          ? opened
+            ? withEmail
+              ? "Доступ сотрудника ДРП открыт, письмо отправлено"
+              : "Доступ сотрудника ДРП открыт"
+            : "Доступ сотрудника ДРП закрыт"
+          : opened
+            ? withEmail
+              ? "Доступ руководителю открыт, письмо отправлено"
+              : "Доступ руководителю открыт"
+            : "Доступ руководителю закрыт",
+      )
+      router.refresh()
+    })
+  }
+
+  const nextAccess = pendingAccess
+  const closing = nextAccess === "closed"
+  const actionLabel = closing ? "Закрыть доступ" : "Открыть доступ"
+
+  return (
+    <>
+      <div className="flex flex-col gap-1">
+        <Select
+          items={[...ACCESS_ITEMS]}
+          value={access}
+          disabled={pending}
+          onValueChange={(value) => {
+            if (value !== "open" && value !== "closed") return
+            if (value === access) return
+            setSendEmail(true)
+            setPendingAccess(value)
+          }}
+        >
+          <SelectTrigger size="sm" className="h-7 min-w-28 text-xs" aria-label={label}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ACCESS_ITEMS.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <EmailSentStatus sent={emailSent} />
+      </div>
+
+      <AlertDialog
+        open={pendingAccess !== null}
+        onOpenChange={(open) => {
+          if (!open && !pending) setPendingAccess(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{actionLabel}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {closing
+                ? `${label} будет закрыт. Получатели больше не смогут открыть отчёт.`
+                : `${label} будет открыт. Получатели смогут просматривать отчёт.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {!closing && (
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={sendEmail} onCheckedChange={(v) => setSendEmail(Boolean(v))} />
+              Отправить письмо на электронную почту
+            </label>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              variant={closing ? "destructive" : "default"}
+              disabled={pending || !nextAccess}
+              onClick={() => {
+                if (!nextAccess) return
+                apply(nextAccess, closing ? false : sendEmail)
+              }}
+            >
+              {actionLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }

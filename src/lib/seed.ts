@@ -86,6 +86,34 @@ export function buildSeed(): Procedure[] {
   }))
 }
 
+function makeSizedTeamReport(
+  procedure: Procedure,
+  memberCount: number,
+  name: string,
+  id: string,
+): TeamReport | null {
+  if (procedure.participants.length < memberCount + 1) return null
+  const leader = procedure.participants[0]
+  const members = procedure.participants.slice(1, memberCount + 1)
+  const hrbp = procedure.participants[memberCount + 1]
+  return {
+    id,
+    name,
+    procedureId: procedure.id,
+    leaderIds: [leader.id],
+    hrbpIds: hrbp ? [hrbp.id] : [],
+    memberIds: members.map((m) => m.id),
+    groups: [],
+    reportAccess: "open",
+    hrbpReportAccess: "closed",
+    reportEmailSent: true,
+    hrbpEmailSent: false,
+    creator: procedure.creator,
+    updatedBy: procedure.creator,
+    updatedAt: procedure.updatedAt,
+  }
+}
+
 /** Демо командные отчёты: по одной команде на подразделение ССП в запущенных процедурах. */
 export function buildTeamReportSeed(procedures: Procedure[]): TeamReport[] {
   const reports: TeamReport[] = []
@@ -103,13 +131,28 @@ export function buildTeamReportSeed(procedures: Procedure[]): TeamReport[] {
         id: String(reports.length + 1),
         name: `${unit.replace(/^Департамент\s+/i, "Команда: ")}`,
         procedureId: procedure.id,
-        leaderId: team[0].id,
+        leaderIds: [team[0].id],
+        hrbpIds: team.length > 2 ? [team[1].id] : [],
         memberIds: team.slice(1).map((m) => m.id),
+        groups: [],
         reportAccess: reports.length % 2 === 0 ? "closed" : "open",
+        hrbpReportAccess: "closed",
+        reportEmailSent: reports.length % 2 !== 0,
+        hrbpEmailSent: false,
         creator: procedure.creator,
+        updatedBy: procedure.creator,
         updatedAt: procedure.updatedAt,
       })
     }
   }
+
+  const large = procedures.find((p) => p.status !== "draft" && p.participants.length >= 90)
+  if (large) {
+    const with14 = makeSizedTeamReport(large, 14, "Команда: 14 сотрудников", String(reports.length + 1))
+    if (with14) reports.push(with14)
+    const with88 = makeSizedTeamReport(large, 88, "Команда: 88 сотрудников", String(reports.length + 1))
+    if (with88) reports.push(with88)
+  }
+
   return reports
 }

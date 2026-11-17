@@ -2,6 +2,7 @@ import "server-only"
 
 import { promises as fs } from "node:fs"
 import path from "node:path"
+import { CURRENT_USER } from "./current-user"
 import { buildSeed, buildTeamReportSeed } from "./seed"
 import type {
   Procedure,
@@ -40,6 +41,40 @@ async function readDb(): Promise<Db> {
     db.teamReports = buildTeamReportSeed(db.procedures)
     await writeDb(db)
   }
+  // Миграции старых записей командных отчётов.
+  let touched = false
+  for (const r of db.teamReports as Array<TeamReport & { leaderId?: string }>) {
+    if (!Array.isArray(r.hrbpIds)) {
+      r.hrbpIds = []
+      touched = true
+    }
+    if (!Array.isArray(r.leaderIds)) {
+      r.leaderIds = r.leaderId ? [r.leaderId] : []
+      delete r.leaderId
+      touched = true
+    }
+    if (r.hrbpReportAccess !== "open" && r.hrbpReportAccess !== "closed") {
+      r.hrbpReportAccess = "closed"
+      touched = true
+    }
+    if (!Array.isArray(r.groups)) {
+      r.groups = []
+      touched = true
+    }
+    if (!r.updatedBy) {
+      r.updatedBy = r.creator
+      touched = true
+    }
+    if (typeof r.reportEmailSent !== "boolean") {
+      r.reportEmailSent = false
+      touched = true
+    }
+    if (typeof r.hrbpEmailSent !== "boolean") {
+      r.hrbpEmailSent = false
+      touched = true
+    }
+  }
+  if (touched) await writeDb(db)
   return db
 }
 
@@ -143,18 +178,31 @@ export async function listLaunchedProcedures(): Promise<ProcedureOption[]> {
 export async function listTeamReports(): Promise<TeamReportSummary[]> {
   const db = await readDb()
   const procedures = new Map(db.procedures.map((p) => [p.id, p]))
+  const peopleById = new Map(
+    db.procedures.flatMap((p) => p.participants.map((person) => [person.id, person.fullName] as const)),
+  )
   return db.teamReports.map((r) => {
     const procedure = procedures.get(r.procedureId)
-    const leader = procedure?.participants.find((p) => p.id === r.leaderId)
+    const leaders = (r.leaderIds ?? [])
+      .map((id) => peopleById.get(id))
+      .filter((name): name is string => Boolean(name))
+    const hrbps = (r.hrbpIds ?? [])
+      .map((id) => peopleById.get(id))
+      .filter((name): name is string => Boolean(name))
     return {
       id: r.id,
       name: r.name,
       procedureId: r.procedureId,
       procedureName: procedure?.name ?? "—",
-      leaderName: leader?.fullName ?? "—",
+      leaderName: leaders.length ? leaders.join(", ") : "—",
+      hrbpName: hrbps.length ? hrbps.join(", ") : "—",
       memberCount: r.memberIds.length,
       reportAccess: r.reportAccess,
+      hrbpReportAccess: r.hrbpReportAccess ?? "closed",
+      reportEmailSent: Boolean(r.reportEmailSent),
+      hrbpEmailSent: Boolean(r.hrbpEmailSent),
       creator: r.creator,
+      updatedBy: r.updatedBy || r.creator,
       updatedAt: r.updatedAt,
     }
   })
@@ -182,6 +230,7 @@ export function updateTeamReport(
     if (!report) throw new Error("Командный отчёт не найден")
     fn(report)
     report.updatedAt = new Date().toISOString()
+    report.updatedBy = CURRENT_USER.fullName
     return report
   })
 }

@@ -15,7 +15,8 @@ export interface ParticipantResults {
   learningStyle: LearningStyle
 }
 
-export type ReportGroupKind = "team" | "leader"
+/** id группы в отчёте: "team" | "leader" | id пользовательской группы */
+export type ReportGroupKind = string
 
 export interface ReportGroup {
   id: ReportGroupKind

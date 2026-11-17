@@ -28,12 +28,32 @@ async function check(
   if (procedure.status === "draft")
     return fail("Командный отчёт можно создать только по запущенной процедуре")
   const ids = new Set(procedure.participants.map((p) => p.id))
-  if (!ids.has(input.leaderId)) return fail("Выберите руководителя из участников процедуры")
-  const memberIds = [...new Set(input.memberIds)].filter((id) => id !== input.leaderId)
+  const leaderIds = [...new Set(input.leaderIds)]
+  if (leaderIds.some((id) => !ids.has(id)))
+    return fail("Выберите руководителей из участников процедуры")
+  const leaderSet = new Set(leaderIds)
+  // Сотрудников ДРП можно выбирать из любой запущенной процедуры, независимо от руководителей.
+  const launched = await store.listLaunchedProcedures()
+  const allPeople = new Set(launched.flatMap((p) => p.participants.map((person) => person.id)))
+  const hrbpIds = [...new Set(input.hrbpIds)].filter((id) => !leaderSet.has(id))
+  if (hrbpIds.some((id) => !allPeople.has(id)))
+    return fail("Среди сотрудников ДРП есть люди, которых нет в запущенных процедурах")
+  const memberIds = [...new Set(input.memberIds)].filter((id) => !leaderSet.has(id))
   if (memberIds.length === 0) return fail("Добавьте в команду хотя бы одного участника")
   if (memberIds.some((id) => !ids.has(id)))
     return fail("В команде есть участники, которых нет в выбранной процедуре")
-  return { ok: true, data: { name, procedureId: procedure.id, leaderId: input.leaderId, memberIds } }
+  const memberSet = new Set(memberIds)
+  const groups = (input.groups ?? [])
+    .map((g, i) => ({
+      id: g.id.trim() || `g${i + 1}`,
+      name: g.name.trim(),
+      memberIds: [...new Set(g.memberIds)].filter((id) => memberSet.has(id)),
+    }))
+    .filter((g) => g.name && g.memberIds.length > 0)
+  return {
+    ok: true,
+    data: { name, procedureId: procedure.id, leaderIds, hrbpIds, memberIds, groups },
+  }
 }
 
 export async function createTeamReportAction(
@@ -44,7 +64,11 @@ export async function createTeamReportAction(
   const created = await store.insertTeamReport({
     ...checked.data,
     reportAccess: "closed",
+    hrbpReportAccess: "closed",
+    reportEmailSent: false,
+    hrbpEmailSent: false,
     creator: CURRENT_USER.fullName,
+    updatedBy: CURRENT_USER.fullName,
     updatedAt: new Date().toISOString(),
   })
   revalidate()
@@ -64,14 +88,24 @@ export async function updateTeamReportAction(
   return { ok: true, data: undefined }
 }
 
+export type TeamReportAccessAudience = "leader" | "hrbp"
+
 export async function setTeamReportAccessAction(
   id: string,
   access: Exclude<ReportAccess, null>,
+  audience: TeamReportAccessAudience = "leader",
+  options?: { sendEmail?: boolean },
 ): Promise<Result> {
   const existing = await store.getTeamReport(id)
   if (!existing) return fail("Командный отчёт не найден")
   await store.updateTeamReport(id, (r) => {
-    r.reportAccess = access
+    if (audience === "hrbp") {
+      r.hrbpReportAccess = access
+      if (access === "open" && options?.sendEmail) r.hrbpEmailSent = true
+    } else {
+      r.reportAccess = access
+      if (access === "open" && options?.sendEmail) r.reportEmailSent = true
+    }
   })
   revalidate()
   return { ok: true, data: undefined }
@@ -83,10 +117,16 @@ export async function duplicateTeamReportAction(id: string): Promise<Result<{ id
   const created = await store.insertTeamReport({
     name: `${source.name} (копия)`,
     procedureId: source.procedureId,
-    leaderId: source.leaderId,
+    leaderIds: [...source.leaderIds],
+    hrbpIds: [...source.hrbpIds],
     memberIds: [...source.memberIds],
+    groups: source.groups.map((g) => ({ ...g, memberIds: [...g.memberIds] })),
     reportAccess: "closed",
+    hrbpReportAccess: "closed",
+    reportEmailSent: false,
+    hrbpEmailSent: false,
     creator: CURRENT_USER.fullName,
+    updatedBy: CURRENT_USER.fullName,
     updatedAt: new Date().toISOString(),
   })
   revalidate()

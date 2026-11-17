@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button"
 import { formatDate } from "@/lib/format"
 import { buildTeamReportData } from "@/lib/report/build"
 import { SCALE_SECTIONS, TRAFFIC_TEXT } from "@/lib/report/definitions"
+import { groupDotClass } from "@/lib/report/group-colors"
 import type { TeamReportData } from "@/lib/report/types"
 import { getProcedure, getTeamReport } from "@/lib/store"
+import { cn } from "@/lib/utils"
 import { CompetencyTraffic } from "./_components/competency-traffic"
 import { Heatmap } from "./_components/heatmap"
 import { IntegralMatrix } from "./_components/integral-matrix"
@@ -56,9 +58,11 @@ const TOC = [
 ]
 
 function Report({ reportId, data }: { reportId: string; data: TeamReportData }) {
-  const team = data.participants.filter((p) => p.group === "team")
-  const leaderCount = data.participants.length - team.length
-  const groupCounts = { team: team.length, leader: leaderCount }
+  const groupIds = data.groups.map((g) => g.id)
+  const nonLeaders = data.participants.filter((p) => p.group !== "leader")
+  const groupCounts = Object.fromEntries(
+    data.groups.map((g) => [g.id, data.participants.filter((p) => p.group === g.id).length]),
+  )
 
   return (
     <div className="flex flex-col gap-3">
@@ -109,15 +113,17 @@ function Report({ reportId, data }: { reportId: string; data: TeamReportData }) 
 
         <div className="flex min-w-0 flex-col gap-3">
           <ReportSection id="participants" title="Состав участников исследования">
-            <GroupLegend />
+            <GroupLegend groups={data.groups} />
             <ol className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
               {data.participants.map((p) => (
                 <li key={p.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40">
-                  <Chip participant={p} />
+                  <Chip participant={p} groupIds={groupIds} />
                   <span className="min-w-0">
                     <span className="block truncate">{p.fullName}</span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      {p.group === "leader" ? "Руководитель" : p.position || "—"}
+                      {p.group === "leader"
+                        ? "Руководитель"
+                        : data.groups.find((g) => g.id === p.group)?.name || p.position || "—"}
                     </span>
                   </span>
                 </li>
@@ -126,6 +132,10 @@ function Report({ reportId, data }: { reportId: string; data: TeamReportData }) 
           </ReportSection>
 
           <ReportSection id="groups" title="Группы участников">
+            <p className="mb-3 text-xs text-muted-foreground">
+              Группы нужны, чтобы сравнивать профили в тепловых картах и интегральных отчётах. Если
+              группировка не задана, все участники входят в одну команду.
+            </p>
             <table className="w-full max-w-xl text-sm">
               <thead className="text-left text-xs text-muted-foreground">
                 <tr>
@@ -141,15 +151,9 @@ function Report({ reportId, data }: { reportId: string; data: TeamReportData }) 
                     <td className="py-2 text-muted-foreground">{i + 1}</td>
                     <td className="py-2">{g.name}</td>
                     <td className="py-2">
-                      <span
-                        className={
-                          g.id === "leader"
-                            ? "inline-block size-4 rounded-full bg-success ring-2 ring-success/30"
-                            : "inline-block size-4 rounded-full bg-primary/20 ring-1 ring-primary/40"
-                        }
-                      />
+                      <span className={cn("inline-block size-4 rounded-full", groupDotClass(g.id, groupIds))} />
                     </td>
-                    <td className="py-2 text-right tabular-nums">{groupCounts[g.id]}</td>
+                    <td className="py-2 text-right tabular-nums">{groupCounts[g.id] ?? 0}</td>
                   </tr>
                 ))}
               </tbody>
@@ -165,7 +169,7 @@ function Report({ reportId, data }: { reportId: string; data: TeamReportData }) 
             title={`Интегральный отчёт: группа «${data.groups[0].name}»`}
             description="«Компетенции Zetic» (стандартные индикаторы), без руководителя"
           >
-            {team.length > 0 ? (
+            {nonLeaders.length > 0 ? (
               <IntegralMatrix points={data.integralTeam} />
             ) : (
               <p className="text-sm text-muted-foreground">В команде нет участников.</p>
@@ -177,7 +181,7 @@ function Report({ reportId, data }: { reportId: string; data: TeamReportData }) 
           </ReportSection>
 
           <ReportSection id="roles" title="Командный профиль: распределение ролей в группе">
-            <GroupLegend />
+            <GroupLegend groups={data.groups} />
             <div className="mt-3">
               <RolesGrid participants={data.participants} />
             </div>

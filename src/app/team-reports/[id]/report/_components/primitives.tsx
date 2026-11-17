@@ -1,12 +1,16 @@
+import { groupChipClass, groupDotClass } from "@/lib/report/group-colors"
 import type { ReportParticipant } from "@/lib/report/types"
 import { cn } from "@/lib/utils"
 
-/** Номер участника в кружке: участники команды — синие, руководитель — зелёный. */
+/** Номер участника в кружке; цвет зависит от группы сравнения. */
 export function Chip({
   participant,
+  groupIds = [],
   size = "md",
 }: {
   participant: ReportParticipant
+  /** Порядок групп в отчёте — для стабильной палитры */
+  groupIds?: string[]
   size?: "sm" | "md"
 }) {
   const leader = participant.group === "leader"
@@ -18,9 +22,7 @@ export function Chip({
       className={cn(
         "inline-flex shrink-0 items-center justify-center rounded-full font-semibold tabular-nums",
         size === "sm" ? "size-5 text-[10px]" : "size-7 text-xs",
-        leader
-          ? "bg-success text-white ring-2 ring-success/30"
-          : "bg-primary/20 text-primary ring-1 ring-primary/40",
+        groupChipClass(participant.group, groupIds),
       )}
     >
       {participant.number}
@@ -30,10 +32,12 @@ export function Chip({
 
 export function ChipList({
   participants,
+  groupIds,
   size,
   className,
 }: {
   participants: ReportParticipant[]
+  groupIds?: string[]
   size?: "sm" | "md"
   className?: string
 }) {
@@ -41,7 +45,7 @@ export function ChipList({
   return (
     <div className={cn("flex flex-wrap gap-1", className)}>
       {participants.map((p) => (
-        <Chip key={p.id} participant={p} size={size} />
+        <Chip key={p.id} participant={p} groupIds={groupIds} size={size} />
       ))}
     </div>
   )
@@ -89,15 +93,27 @@ export function Explanation({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function GroupLegend() {
+export function GroupLegend({
+  groups,
+}: {
+  groups?: Array<{ id: string; name: string }>
+}) {
+  const items =
+    groups && groups.length > 0
+      ? groups
+      : [
+          { id: "team", name: "Участник команды" },
+          { id: "leader", name: "Руководитель" },
+        ]
+  const ids = items.map((g) => g.id)
   return (
     <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-primary/20 ring-1 ring-primary/40" /> Участник команды
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-success ring-2 ring-success/30" /> Руководитель
-      </span>
+      {items.map((g) => (
+        <span key={g.id} className="inline-flex items-center gap-1.5">
+          <span className={cn("size-3 rounded-full", groupDotClass(g.id, ids))} />
+          {g.name}
+        </span>
+      ))}
       <span>Наведите на номер, чтобы увидеть ФИО</span>
     </div>
   )

@@ -47,6 +47,16 @@ export interface ProcedureInput {
 }
 
 /**
+ * Дополнительная группа участников для сравнения в отчёте
+ * (тепловые карты, раздел «Группы участников»). Может отсутствовать.
+ */
+export interface TeamComparisonGroup {
+  id: string
+  name: string
+  memberIds: string[]
+}
+
+/**
  * Командный отчёт: группа участников одной запущенной процедуры
  * и руководитель, который получает сводный отчёт по команде.
  */
@@ -54,12 +64,28 @@ export interface TeamReport {
   id: string
   name: string
   procedureId: string
-  /** id участника процедуры — получателя отчёта */
-  leaderId: string
+  /** id руководителей — получателей отчёта (необязательно) */
+  leaderIds: string[]
+  /** id сотрудников ДРП, закреплённых за отчётом */
+  hrbpIds: string[]
   /** id участников процедуры, входящих в команду */
   memberIds: string[]
+  /**
+   * Пользовательские группы для сравнения в отчёте.
+   * Пустой массив — без доп. группировки (одна команда + руководители).
+   */
+  groups: TeamComparisonGroup[]
+  /** доступ руководителей к отчёту */
   reportAccess: Exclude<ReportAccess, null>
+  /** доступ сотрудника ДРП к отчёту */
+  hrbpReportAccess: Exclude<ReportAccess, null>
+  /** письмо руководителям об открытии доступа */
+  reportEmailSent: boolean
+  /** письмо сотрудникам ДРП об открытии доступа */
+  hrbpEmailSent: boolean
   creator: string
+  /** Кто внёс последнее изменение (может отличаться от создателя) */
+  updatedBy: string
   /** ISO-дата и время */
   updatedAt: string
 }
@@ -70,17 +96,24 @@ export interface TeamReportSummary {
   procedureId: string
   procedureName: string
   leaderName: string
+  hrbpName: string
   memberCount: number
   reportAccess: Exclude<ReportAccess, null>
+  hrbpReportAccess: Exclude<ReportAccess, null>
+  reportEmailSent: boolean
+  hrbpEmailSent: boolean
   creator: string
+  updatedBy: string
   updatedAt: string
 }
 
 export interface TeamReportInput {
   name: string
   procedureId: string
-  leaderId: string
+  leaderIds: string[]
+  hrbpIds: string[]
   memberIds: string[]
+  groups: TeamComparisonGroup[]
 }
 
 /** Процедура, доступная для командного отчёта, — с участниками. */
