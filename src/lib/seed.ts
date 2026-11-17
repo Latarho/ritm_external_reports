@@ -1,4 +1,4 @@
-import type { Participant, Procedure } from "./types"
+import type { Participant, Procedure, TeamReport } from "./types"
 import { buildExternalLink } from "./links"
 
 // Все данные вымышленные — только для демонстрации интерфейса.
@@ -84,4 +84,32 @@ export function buildSeed(): Procedure[] {
     sendNotifications: true,
     participants: makeParticipants(idx + 1, count, p.status !== "draft"),
   }))
+}
+
+/** Демо командные отчёты: по одной команде на подразделение ССП в запущенных процедурах. */
+export function buildTeamReportSeed(procedures: Procedure[]): TeamReport[] {
+  const reports: TeamReport[] = []
+  for (const procedure of procedures) {
+    if (procedure.status === "draft") continue
+    const byUnit = new Map<string, Participant[]>()
+    for (const p of procedure.participants) {
+      if (!p.sspUnit) continue
+      byUnit.set(p.sspUnit, [...(byUnit.get(p.sspUnit) ?? []), p])
+    }
+    const teams = [...byUnit.entries()].filter(([, members]) => members.length >= 2).slice(0, 2)
+    for (const [unit, members] of teams) {
+      const team = members.slice(0, 12)
+      reports.push({
+        id: String(reports.length + 1),
+        name: `${unit.replace(/^Департамент\s+/i, "Команда: ")}`,
+        procedureId: procedure.id,
+        leaderId: team[0].id,
+        memberIds: team.slice(1).map((m) => m.id),
+        reportAccess: reports.length % 2 === 0 ? "closed" : "open",
+        creator: procedure.creator,
+        updatedAt: procedure.updatedAt,
+      })
+    }
+  }
+  return reports
 }

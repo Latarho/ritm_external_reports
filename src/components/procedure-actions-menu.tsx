@@ -43,7 +43,7 @@ type Confirm = "delete" | "launch" | "complete" | null
 const CONFIRM_TEXT: Record<Exclude<Confirm, null>, { title: string; body: string; action: string }> = {
   delete: {
     title: "Удалить процедуру?",
-    body: "Процедура и список её участников будут удалены. Это действие нельзя отменить.",
+    body: "Процедура, список её участников и командные отчёты по ней будут удалены. Это действие нельзя отменить.",
     action: "Удалить",
   },
   launch: {

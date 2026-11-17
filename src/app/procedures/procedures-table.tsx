@@ -2,8 +2,9 @@
 
 import Link from "next/link"
 import { useMemo, useState } from "react"
-import { ChevronLeftIcon, ChevronRightIcon, PencilIcon } from "lucide-react"
+import { PencilIcon } from "lucide-react"
 import { ProcedureActionsMenu } from "@/components/procedure-actions-menu"
+import { SimplePagination } from "@/components/simple-pagination"
 import { SortButton, compareValues, nextSort, type SortDir } from "@/components/sort-button"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
@@ -129,39 +130,12 @@ export function ProceduresTable({ procedures }: { procedures: ProcedureSummary[]
         </Table>
       </div>
 
-      <div className="mt-3 flex items-center justify-end gap-2 text-xs">
-        <span className="text-muted-foreground">Всего {procedures.length}</span>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Предыдущая страница"
-          disabled={current <= 1}
-          onClick={() => setPage(current - 1)}
-        >
-          <ChevronLeftIcon />
-        </Button>
-        {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
-          <Button
-            key={n}
-            size="icon-sm"
-            variant={n === current ? "default" : "ghost"}
-            className={n === current ? "bg-foreground/80 hover:bg-foreground/70" : undefined}
-            aria-current={n === current ? "page" : undefined}
-            onClick={() => setPage(n)}
-          >
-            {n}
-          </Button>
-        ))}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Следующая страница"
-          disabled={current >= pageCount}
-          onClick={() => setPage(current + 1)}
-        >
-          <ChevronRightIcon />
-        </Button>
-      </div>
+      <SimplePagination
+        total={procedures.length}
+        page={current}
+        pageCount={pageCount}
+        onPageChange={setPage}
+      />
     </div>
   )
 }

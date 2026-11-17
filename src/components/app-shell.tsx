@@ -37,7 +37,7 @@ const TOOLS = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col bg-page">
-      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4">
+      <header className="sticky top-0 z-30 flex print:hidden h-14 shrink-0 items-center gap-3 border-b bg-background px-4">
         <Link
           href="/procedures"
           aria-label="На главную"
@@ -80,7 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       <div className="flex flex-1">
-        <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-16 shrink-0 flex-col items-center gap-2 border-r bg-background py-3 sm:flex">
+        <aside className="sticky top-14 hidden print:hidden h-[calc(100vh-3.5rem)] w-16 shrink-0 flex-col items-center gap-2 border-r bg-background py-3 sm:flex">
           <div className="mb-2 flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
             <UserIcon className="size-5" />
           </div>
@@ -107,7 +107,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )
           })}
         </aside>
-        <main className="min-w-0 flex-1 p-3 sm:p-4">{children}</main>
+        <main className="min-w-0 flex-1 p-3 sm:p-4 print:p-0">{children}</main>
       </div>
     </div>
   )

@@ -28,6 +28,19 @@ function crumbsFor(pathname: string): Crumb[] {
     return [...base, { label: "Процедуры", href: "/procedures" }, { label: "Новая процедура" }]
   if (pathname.startsWith("/procedures/"))
     return [...base, { label: "Процедуры", href: "/procedures" }, { label: "Информация о процедуре" }]
+  if (pathname === "/team-reports") return [...base, { label: "Командные отчёты" }]
+  if (pathname === "/team-reports/new")
+    return [...base, { label: "Командные отчёты", href: "/team-reports" }, { label: "Новый командный отчёт" }]
+  const reportView = pathname.match(/^\/team-reports\/([^/]+)\/report$/)
+  if (reportView)
+    return [
+      ...base,
+      { label: "Командные отчёты", href: "/team-reports" },
+      { label: "Командный отчёт", href: `/team-reports/${reportView[1]}` },
+      { label: "Просмотр отчёта" },
+    ]
+  if (pathname.startsWith("/team-reports/"))
+    return [...base, { label: "Командные отчёты", href: "/team-reports" }, { label: "Командный отчёт" }]
   return base
 }
 

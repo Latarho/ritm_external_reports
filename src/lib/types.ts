@@ -46,6 +46,49 @@ export interface ProcedureInput {
   participants: Participant[]
 }
 
+/**
+ * Командный отчёт: группа участников одной запущенной процедуры
+ * и руководитель, который получает сводный отчёт по команде.
+ */
+export interface TeamReport {
+  id: string
+  name: string
+  procedureId: string
+  /** id участника процедуры — получателя отчёта */
+  leaderId: string
+  /** id участников процедуры, входящих в команду */
+  memberIds: string[]
+  reportAccess: Exclude<ReportAccess, null>
+  creator: string
+  /** ISO-дата и время */
+  updatedAt: string
+}
+
+export interface TeamReportSummary {
+  id: string
+  name: string
+  procedureId: string
+  procedureName: string
+  leaderName: string
+  memberCount: number
+  reportAccess: Exclude<ReportAccess, null>
+  creator: string
+  updatedAt: string
+}
+
+export interface TeamReportInput {
+  name: string
+  procedureId: string
+  leaderId: string
+  memberIds: string[]
+}
+
+/** Процедура, доступная для командного отчёта, — с участниками. */
+export type ProcedureOption = Pick<
+  Procedure,
+  "id" | "name" | "status" | "startDate" | "endDate" | "participants"
+>
+
 export const PROCEDURE_TYPES = ['Опросник "Zetic"'] as const
 
 export const STATUS_LABELS: Record<ProcedureStatus, string> = {

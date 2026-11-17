@@ -21,6 +21,8 @@ function fail(error: string): { ok: false; error: string } {
 
 function revalidate() {
   revalidatePath("/procedures", "layout")
+  // Командные отчёты показывают участников процедур и удаляются вместе с процедурой.
+  revalidatePath("/team-reports", "layout")
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
