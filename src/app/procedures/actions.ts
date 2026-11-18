@@ -2,6 +2,7 @@
 
 import ExcelJS from "exceljs"
 import { revalidatePath } from "next/cache"
+import { actionError as fail, type ActionResult as Result } from "@/lib/action-result"
 import { buildExternalLink } from "@/lib/links"
 import * as store from "@/lib/store"
 import { CURRENT_USER } from "@/lib/current-user"
@@ -12,12 +13,6 @@ import type {
 } from "@/lib/types"
 
 // TODO: при подключении к реальной системе — проверять права пользователя в каждом действии.
-
-type Result<T = undefined> = { ok: true; data: T } | { ok: false; error: string }
-
-function fail(error: string): { ok: false; error: string } {
-  return { ok: false, error }
-}
 
 function revalidate() {
   revalidatePath("/procedures", "layout")

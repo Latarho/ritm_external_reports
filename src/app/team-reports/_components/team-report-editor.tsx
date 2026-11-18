@@ -2,8 +2,8 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useRef, useState, useTransition } from "react"
-import { DownloadIcon, FileTextIcon, LockIcon, LockOpenIcon, PlusIcon, UploadIcon, UserMinusIcon } from "lucide-react"
+import { useMemo, useRef, useState, useTransition } from "react"
+import { CircleHelpIcon, DownloadIcon, FileTextIcon, LockIcon, LockOpenIcon, PlusIcon, UploadIcon, UserMinusIcon } from "lucide-react"
 import { toast } from "sonner"
 import { AccessStatus } from "@/app/procedures/_components/access-status"
 import { importParticipantsAction } from "@/app/procedures/actions"
@@ -12,6 +12,7 @@ import { ReportDialog } from "@/app/procedures/_components/report-dialog"
 import { Cell, EmptyState, HeadCell } from "@/app/procedures/_components/table-bits"
 import { useParticipantView } from "@/app/procedures/_components/use-participant-view"
 import { ParticipantAvatar } from "@/components/participant-avatar"
+import { TeamReportStatusBadge } from "@/components/status-badge"
 import { SimplePagination } from "@/components/simple-pagination"
 import {
   AlertDialog,
@@ -28,17 +29,22 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useWarnUnsaved } from "@/components/use-warn-unsaved"
+import { teamReportAccessMessage } from "@/lib/access-message"
 import { formatLastChange, pluralRu } from "@/lib/format"
-import type { Participant, ProcedureOption, ReportAccess, TeamReport, TeamReportInput } from "@/lib/types"
+import type { Participant, ProcedureOption, ReportAccess, TeamReport, TeamReportInput, TeamReportStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
   createTeamReportAction,
   setTeamReportAccessAction,
+  setTeamReportStatusAction,
   updateTeamReportAction,
   type TeamReportAccessAudience,
 } from "../actions"
 import { AddMembersDialog } from "./add-members-dialog"
 import { EmailSentStatus } from "./email-sent-status"
+import { formAfterMemberImport, matchImportedMembers } from "./match-imported-members"
 import { PeopleMultiPicker } from "./people-multi-picker"
 
 type Person = Participant & { procedureId: string }
@@ -70,6 +76,7 @@ export function TeamReportEditor({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [addOpen, setAddOpen] = useState(false)
   const [personalReport, setPersonalReport] = useState<Person | null>(null)
+  const [confirmStatus, setConfirmStatus] = useState<TeamReportStatus | null>(null)
   const [membersPage, setMembersPage] = useState(1)
   const [pending, startTransition] = useTransition()
   const excelInputRef = useRef<HTMLInputElement>(null)
@@ -84,12 +91,7 @@ export function TeamReportEditor({
   }
 
   const dirty = JSON.stringify(form) !== JSON.stringify(initial)
-  useEffect(() => {
-    if (!dirty) return
-    const handler = (e: BeforeUnloadEvent) => e.preventDefault()
-    window.addEventListener("beforeunload", handler)
-    return () => window.removeEventListener("beforeunload", handler)
-  }, [dirty])
+  useWarnUnsaved(dirty)
 
   const people = useMemo<Person[]>(
     () => procedures.flatMap((p) => p.participants.map((person) => ({ ...person, procedureId: p.id }))),
@@ -150,9 +152,12 @@ export function TeamReportEditor({
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
   const someSelected = visibleIds.some((id) => selected.has(id))
 
-  useEffect(() => {
+  const memberQuery = `${view.isFiltered}:${view.rows.length}`
+  const [memberQuerySeen, setMemberQuerySeen] = useState(memberQuery)
+  if (memberQuerySeen !== memberQuery) {
+    setMemberQuerySeen(memberQuery)
     setMembersPage(1)
-  }, [view.rows.length, view.isFiltered])
+  }
 
   const errors = {
     name: !form.name.trim() ? "Укажите название" : null,
@@ -161,6 +166,9 @@ export function TeamReportEditor({
   }
   const hasErrors = Object.values(errors).some(Boolean)
   const show = (key: keyof typeof errors) => (submitted ? errors[key] : null)
+
+  const canEditMembers = !report || report.status === "draft"
+  const canOpenAccess = report?.status === "active"
 
   function set<K extends keyof TeamReportInput>(key: K, value: TeamReportInput[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -175,6 +183,21 @@ export function TeamReportEditor({
     if (!first) return
     const nextIds = ids.filter((id) => byId.get(id)?.procedureId === first.procedureId)
     const nextSet = new Set(nextIds)
+    if (!canEditMembers) {
+      const changesTeam =
+        (form.procedureId !== "" && first.procedureId !== form.procedureId) ||
+        nextIds.some((id) => form.memberIds.includes(id))
+      if (changesTeam) {
+        toast.error("Добавлять и убирать сотрудников можно только в статусе «Черновик»")
+        return
+      }
+      setForm((f) => ({
+        ...f,
+        leaderIds: nextIds,
+        hrbpIds: f.hrbpIds.filter((h) => !nextSet.has(h)),
+      }))
+      return
+    }
     setForm((f) => {
       const sameProcedure = f.procedureId === first.procedureId
       const memberIds = sameProcedure ? f.memberIds.filter((m) => !nextSet.has(m)) : []
@@ -196,6 +219,7 @@ export function TeamReportEditor({
   }
 
   function removeSelected() {
+    if (!canEditMembers) return
     const n = selected.size
     const memberIds = form.memberIds.filter((id) => !selected.has(id))
     setForm((f) => ({
@@ -213,103 +237,42 @@ export function TeamReportEditor({
 
   /** Загрузка Excel: сопоставление по внешнему логину с участниками запущенных процедур. */
   function importExcel(file: File) {
+    if (!canEditMembers) return
     startTransition(async () => {
       const fd = new FormData()
       fd.set("file", file)
       const res = await importParticipantsAction(fd)
       if (!res.ok) return void toast.error(res.error)
 
-      const byLogin = new Map<string, Person[]>()
-      for (const person of people) {
-        const key = person.externalLogin.trim().toLowerCase()
-        if (!key) continue
-        const list = byLogin.get(key) ?? []
-        list.push(person)
-        byLogin.set(key, list)
-      }
-
-      const preferredProcedureId = procedureId || null
-      const matched: Person[] = []
-      let unknown = 0
-      let duplicates = 0
-
-      for (const row of res.data.participants) {
-        const key = row.externalLogin.trim().toLowerCase()
-        if (!key) {
-          unknown++
-          continue
-        }
-        const candidates = byLogin.get(key) ?? []
-        if (candidates.length === 0) {
-          unknown++
-          continue
-        }
-        const person =
-          (preferredProcedureId
-            ? candidates.find((c) => c.procedureId === preferredProcedureId)
-            : undefined) ?? candidates[0]
-        if (matched.some((m) => m.id === person.id) || form.memberIds.includes(person.id)) {
-          duplicates++
-          continue
-        }
-        if (form.leaderIds.includes(person.id)) {
-          duplicates++
-          continue
-        }
-        matched.push(person)
-      }
-
-      if (matched.length === 0) {
+      const plan = matchImportedMembers(
+        res.data.participants,
+        people,
+        procedureId || null,
+        form.memberIds,
+        form.leaderIds,
+      )
+      if (!plan.matched) {
         return void toast.warning(
-          unknown || duplicates
+          plan.unknown || plan.duplicates
             ? "Новых участников не добавлено: логины не найдены в процедурах или уже в команде"
             : "В файле нет строк с сотрудниками",
         )
       }
 
-      // Команда из одной процедуры: берём процедуру большинства совпадений.
-      const countByProc = new Map<string, number>()
-      for (const m of matched) countByProc.set(m.procedureId, (countByProc.get(m.procedureId) ?? 0) + 1)
-      let targetProcedureId = preferredProcedureId ?? matched[0].procedureId
-      let best = 0
-      for (const [id, count] of countByProc) {
-        if (count > best) {
-          best = count
-          targetProcedureId = id
-        }
-      }
-      const accepted = matched.filter((m) => m.procedureId === targetProcedureId)
-      const skippedOtherProc = matched.length - accepted.length
+      setForm((current) => ({
+        ...current,
+        ...formAfterMemberImport(
+          current,
+          procedures,
+          plan.accepted.map((person) => person.id),
+          plan.targetProcedureId,
+        ),
+      }))
 
-      setForm((f) => {
-        const inProcedure = new Set(
-          procedures.find((p) => p.id === targetProcedureId)?.participants.map((p) => p.id) ?? [],
-        )
-        const keptMembers =
-          f.procedureId === targetProcedureId ? f.memberIds.filter((id) => inProcedure.has(id)) : []
-        const memberIds = [...new Set([...keptMembers, ...accepted.map((m) => m.id)])]
-        return {
-          ...f,
-          procedureId: targetProcedureId,
-          memberIds,
-          leaderIds: f.leaderIds.filter((id) => inProcedure.has(id)),
-          groups:
-            f.procedureId === targetProcedureId
-              ? f.groups
-                  .map((g) => ({
-                    ...g,
-                    memberIds: g.memberIds.filter((id) => memberIds.includes(id)),
-                  }))
-                  .filter((g) => g.memberIds.length > 0)
-              : [],
-        }
-      })
-
+      const skipped = plan.unknown + plan.duplicates + plan.skippedOtherProc
       toast.success(
-        `Загружено: ${accepted.length}` +
-          (unknown || duplicates || skippedOtherProc
-            ? `, пропущено: ${unknown + duplicates + skippedOtherProc}`
-            : "") +
+        `Загружено: ${plan.accepted.length}` +
+          (skipped ? `, пропущено: ${skipped}` : "") +
           ". Нажмите «Сохранить», чтобы применить изменения.",
       )
     })
@@ -337,27 +300,26 @@ export function TeamReportEditor({
     })
   }
 
-  function toggleAccess(audience: TeamReportAccessAudience, sendEmail = false) {
+  function changeStatus(next: TeamReportStatus) {
     if (!report) return
+    if (dirty) return void toast.error("Сначала сохраните изменения")
+    startTransition(async () => {
+      const res = await setTeamReportStatusAction(report.id, next)
+      setConfirmStatus(null)
+      if (!res.ok) return void toast.error(res.error)
+      toast.success(next === "active" ? "Отчёт активирован" : "Отчёт возвращён в черновик")
+      router.refresh()
+    })
+  }
+
+  function toggleAccess(audience: TeamReportAccessAudience, sendEmail = false) {
+    if (!report || !canOpenAccess) return
     const current = audience === "hrbp" ? report.hrbpReportAccess : report.reportAccess
     const next: Exclude<ReportAccess, null> = current === "open" ? "closed" : "open"
     startTransition(async () => {
       const res = await setTeamReportAccessAction(report.id, next, audience, { sendEmail })
       if (!res.ok) return void toast.error(res.error)
-      const opened = next === "open"
-      toast.success(
-        audience === "hrbp"
-          ? opened
-            ? sendEmail
-              ? "Доступ сотрудника ДРП открыт, письмо отправлено"
-              : "Доступ сотрудника ДРП открыт"
-            : "Доступ сотрудника ДРП закрыт"
-          : opened
-            ? sendEmail
-              ? "Доступ руководителю открыт, письмо отправлено"
-              : "Доступ руководителю открыт"
-            : "Доступ руководителю закрыт",
-      )
+      toast.success(teamReportAccessMessage(audience, next === "open", sendEmail))
       router.refresh()
     })
   }
@@ -382,22 +344,33 @@ export function TeamReportEditor({
       <section className="rounded-xl bg-background shadow-xs">
         <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
           <h1 className="text-base font-semibold">Данные командного отчёта</h1>
+          {report && <TeamReportStatusBadge status={report.status} />}
           {report && (
-            <Button
-              className="ml-auto"
-              variant="secondary"
-              render={<Link href={`/team-reports/${report.id}/report`} />}
-              nativeButton={false}
-            >
-              <FileTextIcon /> Командный отчёт
-            </Button>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {report.status === "draft" ? (
+                <Button size="sm" disabled={pending || members.length === 0} onClick={() => setConfirmStatus("active")}>
+                  Активировать
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" disabled={pending} onClick={() => setConfirmStatus("draft")}>
+                  Вернуть в черновик
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                render={<Link href={`/team-reports/${report.id}/report`} />}
+                nativeButton={false}
+              >
+                <FileTextIcon /> Командный отчёт
+              </Button>
+            </div>
           )}
         </div>
         <div className="grid gap-5 p-4">
           <Field id="name" label="Название" error={show("name")} required>
             <Input
               id="name"
-              className="max-w-xl"
+              className="w-1/2"
               value={form.name}
               placeholder="Например, команда отдела аналитики"
               aria-invalid={!!show("name") || undefined}
@@ -406,8 +379,17 @@ export function TeamReportEditor({
           </Field>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="grid content-start gap-3 rounded-lg border border-border/70 bg-muted/20 p-3">
-              <Field id="leader" label="Руководитель">
+            <section className="overflow-hidden rounded-lg border border-primary/25 bg-primary/5">
+              <h3 className="flex items-center gap-1.5 border-b border-primary/15 bg-primary/10 px-3 py-2 text-sm font-semibold">
+                <Label htmlFor="leader" className="text-sm font-semibold">
+                  Руководитель
+                </Label>
+                <Hint
+                  label="Где руководитель увидит отчёт"
+                  text="Увидит командный отчёт в сервисе «Оценка», в разделе «Внешняя оценка»."
+                />
+              </h3>
+              <div className="grid content-start gap-3 p-3">
                 <PeopleMultiPicker
                   id="leader"
                   participants={leaderCandidates}
@@ -418,20 +400,30 @@ export function TeamReportEditor({
                   removeRoleLabel="руководителя"
                   onChange={setLeaders}
                 />
-              </Field>
-              {report && (
-                <AccessControls
-                  label="Доступ для руководителя"
-                  access={report.reportAccess}
-                  emailSent={report.reportEmailSent}
-                  pending={pending}
-                  onToggle={(sendEmail) => toggleAccess("leader", sendEmail)}
-                />
-              )}
-            </div>
+                {report && (
+                  <AccessControls
+                    label="Доступ для руководителя"
+                    access={report.reportAccess}
+                    emailSent={report.reportEmailSent}
+                    pending={pending}
+                    disabled={!canOpenAccess}
+                    onToggle={(sendEmail) => toggleAccess("leader", sendEmail)}
+                  />
+                )}
+              </div>
+            </section>
 
-            <div className="grid content-start gap-3 rounded-lg border border-border/70 bg-muted/20 p-3">
-              <Field id="hrbp" label="Сотрудник ДРП">
+            <section className="overflow-hidden rounded-lg border border-primary/25 bg-primary/5">
+              <h3 className="flex items-center gap-1.5 border-b border-primary/15 bg-primary/10 px-3 py-2 text-sm font-semibold">
+                <Label htmlFor="hrbp" className="text-sm font-semibold">
+                  Сотрудник ДРП
+                </Label>
+                <Hint
+                  label="Где сотрудник ДРП увидит отчёт"
+                  text="Увидит командный отчёт в администрировании сервиса «Внешняя оценка»."
+                />
+              </h3>
+              <div className="grid content-start gap-3 p-3">
                 <PeopleMultiPicker
                   id="hrbp"
                   participants={hrbpCandidates}
@@ -442,17 +434,18 @@ export function TeamReportEditor({
                   removeRoleLabel="сотрудника ДРП"
                   onChange={(ids) => set("hrbpIds", ids)}
                 />
-              </Field>
-              {report && (
-                <AccessControls
-                  label="Доступ для сотрудника ДРП"
-                  access={report.hrbpReportAccess ?? "closed"}
-                  emailSent={report.hrbpEmailSent}
-                  pending={pending}
-                  onToggle={(sendEmail) => toggleAccess("hrbp", sendEmail)}
-                />
-              )}
-            </div>
+                {report && (
+                  <AccessControls
+                    label="Доступ для сотрудника ДРП"
+                    access={report.hrbpReportAccess ?? "closed"}
+                    emailSent={report.hrbpEmailSent}
+                    pending={pending}
+                    disabled={!canOpenAccess}
+                    onToggle={(sendEmail) => toggleAccess("hrbp", sendEmail)}
+                  />
+                )}
+              </div>
+            </section>
           </div>
         </div>
         {report && (
@@ -468,11 +461,16 @@ export function TeamReportEditor({
           <h2 className="text-base font-semibold">Список сотрудников</h2>
         </div>
         <div className="flex flex-col gap-3 p-4">
+          {!canEditMembers && (
+            <p className="text-xs text-muted-foreground">
+              Состав команды можно менять только в статусе «Черновик».
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
-            <Button disabled={memberProcedures.length === 0} onClick={() => setAddOpen(true)}>
+            <Button disabled={!canEditMembers || memberProcedures.length === 0} onClick={() => setAddOpen(true)}>
               <PlusIcon /> Добавить сотрудников
             </Button>
-            <Button variant="destructive" disabled={selected.size === 0} onClick={removeSelected}>
+            <Button variant="destructive" disabled={!canEditMembers || selected.size === 0} onClick={removeSelected}>
               <UserMinusIcon /> Удалить сотрудников{selected.size > 0 && ` (${selected.size})`}
             </Button>
             <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -489,7 +487,7 @@ export function TeamReportEditor({
               </Button>
               <Button
                 variant="secondary"
-                disabled={pending || people.length === 0}
+                disabled={!canEditMembers || pending || people.length === 0}
                 onClick={() => excelInputRef.current?.click()}
               >
                 <UploadIcon /> Загрузить Excel
@@ -499,6 +497,7 @@ export function TeamReportEditor({
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 className="hidden"
+                disabled={!canEditMembers}
                 onChange={(e) => {
                   const file = e.target.files?.[0]
                   e.target.value = ""
@@ -522,7 +521,7 @@ export function TeamReportEditor({
                     label={
                       <Checkbox
                         aria-label="Выбрать всех"
-                        disabled={visibleIds.length === 0}
+                        disabled={!canEditMembers || visibleIds.length === 0}
                         checked={allSelected}
                         indeterminate={!allSelected && someSelected}
                         onCheckedChange={(checked) => {
@@ -584,6 +583,7 @@ export function TeamReportEditor({
                       <TableCell className="w-10">
                         <Checkbox
                           aria-label={`Выбрать ${p.fullName}`}
+                          disabled={!canEditMembers}
                           checked={selected.has(p.id)}
                           onCheckedChange={(checked) => {
                             const next = new Set(selected)
@@ -645,6 +645,7 @@ export function TeamReportEditor({
         procedures={memberProcedures}
         initialProcedureId={procedureId || undefined}
         onAdd={({ procedureId: fromProcedureId, memberIds: ids, groups: newGroups }) => {
+          if (!canEditMembers) return
           const pool = procedures.find((p) => p.id === fromProcedureId)
           const inProcedure = new Set(pool?.participants.map((p) => p.id) ?? [])
           setForm((f) => {
@@ -686,6 +687,29 @@ export function TeamReportEditor({
         }
         onOpenChange={(open) => !open && setPersonalReport(null)}
       />
+      <AlertDialog open={confirmStatus !== null} onOpenChange={(open) => !open && !pending && setConfirmStatus(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmStatus === "active" ? "Активировать отчёт?" : "Вернуть отчёт в черновик?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmStatus === "active"
+                ? "После активации состав команды нельзя будет менять. Отчёт можно будет показать руководителю и сотруднику ДРП."
+                : "Состав команды снова можно будет менять. Доступ руководителя и сотрудника ДРП будет закрыт."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pending || !confirmStatus}
+              onClick={() => confirmStatus && changeStatus(confirmStatus)}
+            >
+              {confirmStatus === "active" ? "Активировать" : "Вернуть в черновик"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -695,12 +719,14 @@ function AccessControls({
   access,
   emailSent,
   pending,
+  disabled,
   onToggle,
 }: {
   label: string
   access: Exclude<ReportAccess, null>
   emailSent: boolean
   pending: boolean
+  disabled?: boolean
   onToggle: (sendEmail: boolean) => void
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -718,7 +744,8 @@ function AccessControls({
           <Button
             variant="outline"
             size="sm"
-            disabled={pending}
+            disabled={pending || disabled}
+            title={disabled ? "Доступ открывается в статусе «Активный»" : undefined}
             onClick={() => {
               setSendEmail(true)
               setConfirmOpen(true)
@@ -729,6 +756,11 @@ function AccessControls({
           </Button>
         </div>
         <EmailSentStatus sent={emailSent} />
+        {disabled && (
+          <p className="text-xs text-muted-foreground">
+            Показать отчёт можно только в статусе «Активный».
+          </p>
+        )}
       </div>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -763,6 +795,25 @@ function AccessControls({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  )
+}
+
+function Hint({ label, text }: { label: string; text: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            className="inline-flex size-5 items-center justify-center rounded-full text-primary/80 hover:bg-primary/10 hover:text-primary"
+          />
+        }
+      >
+        <CircleHelpIcon className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72 whitespace-normal text-left">{text}</TooltipContent>
+    </Tooltip>
   )
 }
 

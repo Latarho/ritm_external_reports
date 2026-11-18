@@ -9,7 +9,7 @@ export type ListFilterKey = "position" | "sspUnit" | "vspUnit" | "reportAccess"
 export type SearchKey = "fullName" | "externalLogin"
 
 /** Сортировка, поиск и фильтры по колонкам таблицы сотрудников. */
-export function useParticipantView(participants: Participant[]) {
+export function useParticipantView<T extends Participant>(participants: T[]) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null)
   const [search, setSearch] = useState<Record<SearchKey, string>>({
     fullName: "",
@@ -27,7 +27,7 @@ export function useParticipantView(participants: Participant[]) {
       fullName: search.fullName.trim().toLowerCase(),
       externalLogin: search.externalLogin.trim().toLowerCase(),
     }
-    let list = participants.filter((p) => {
+    let list: T[] = participants.filter((p) => {
       if (q.fullName && !p.fullName.toLowerCase().includes(q.fullName)) return false
       if (q.externalLogin && !p.externalLogin.toLowerCase().includes(q.externalLogin)) return false
       for (const key of ["position", "sspUnit", "vspUnit"] as const) {

@@ -1,25 +1,23 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState } from "react"
 import { PencilIcon } from "lucide-react"
 import { ProcedureActionsMenu } from "@/components/procedure-actions-menu"
 import { SimplePagination } from "@/components/simple-pagination"
-import { SortButton, compareValues, nextSort, type SortDir } from "@/components/sort-button"
+import { SortableColumns } from "@/components/sortable-columns"
+import { usePagedSort } from "@/components/use-paged-sort"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatDate } from "@/lib/format"
 import type { ProcedureSummary } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 const PAGE_SIZE = 10
 
@@ -38,43 +36,23 @@ const COLUMNS: Array<{ label: string; sort?: SortKey; className?: string }> = [
 ]
 
 export function ProceduresTable({ procedures }: { procedures: ProcedureSummary[] }) {
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null)
-  const [page, setPage] = useState(1)
-
-  const sorted = useMemo(() => {
-    if (!sort) return procedures
-    const factor = sort.dir === "asc" ? 1 : -1
-    return [...procedures].sort((a, b) => factor * compareValues(a[sort.key], b[sort.key]))
-  }, [procedures, sort])
-
-  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
-  const current = Math.min(page, pageCount)
-  const rows = sorted.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE)
+  const { sort, rows, page, pageCount, setPage, sortBy } = usePagedSort<ProcedureSummary, SortKey>(
+    procedures,
+    PAGE_SIZE,
+  )
 
   return (
     <div className="p-4 pt-3">
       <div className="overflow-x-auto rounded-lg">
         <Table className="min-w-[1100px] text-xs">
           <TableHeader className="bg-table-head">
-            <TableRow className="hover:bg-transparent">
-              {COLUMNS.map((col) => (
-                <TableHead key={col.label} className={cn("h-9 font-semibold text-foreground", col.className)}>
-                  <span className="inline-flex items-center gap-1">
-                    {col.label}
-                    {col.sort && (
-                      <SortButton
-                        label={col.label}
-                        dir={sort?.key === col.sort ? sort.dir : null}
-                        onClick={() => {
-                          setSort((s) => nextSort(s, col.sort!))
-                          setPage(1)
-                        }}
-                      />
-                    )}
-                  </span>
-                </TableHead>
-              ))}
-            </TableRow>
+            <SortableColumns
+              columns={COLUMNS}
+              sort={sort}
+              onSort={sortBy}
+              headClassName="h-9 font-semibold text-foreground"
+              clusterClassName="inline-flex items-center gap-1"
+            />
           </TableHeader>
           <TableBody>
             {rows.length === 0 && (
@@ -132,7 +110,7 @@ export function ProceduresTable({ procedures }: { procedures: ProcedureSummary[]
 
       <SimplePagination
         total={procedures.length}
-        page={current}
+        page={page}
         pageCount={pageCount}
         onPageChange={setPage}
       />

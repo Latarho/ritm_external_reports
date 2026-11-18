@@ -1,10 +1,11 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState, useTransition } from "react"
+import { useMemo, useState, useTransition } from "react"
 import { PlayIcon } from "lucide-react"
 import { toast } from "sonner"
 import { DatePicker } from "@/components/date-picker"
+import { useWarnUnsaved } from "@/components/use-warn-unsaved"
 import { ProcedureActionsMenu } from "@/components/procedure-actions-menu"
 import { StatusBadge } from "@/components/status-badge"
 import {
@@ -67,13 +68,7 @@ export function ProcedureEditor({ procedure }: { procedure: Procedure | null }) 
   }
 
   const dirty = editable && JSON.stringify(form) !== JSON.stringify(initial)
-
-  useEffect(() => {
-    if (!dirty) return
-    const handler = (e: BeforeUnloadEvent) => e.preventDefault()
-    window.addEventListener("beforeunload", handler)
-    return () => window.removeEventListener("beforeunload", handler)
-  }, [dirty])
+  useWarnUnsaved(dirty)
 
   const errors = {
     name: !form.name.trim() ? "Укажите название" : null,

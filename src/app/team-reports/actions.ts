@@ -1,17 +1,12 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import { actionError as fail, type ActionResult as Result } from "@/lib/action-result"
 import { CURRENT_USER } from "@/lib/current-user"
 import * as store from "@/lib/store"
-import type { ReportAccess, TeamReportInput } from "@/lib/types"
+import type { ReportAccess, TeamReportInput, TeamReportStatus } from "@/lib/types"
 
 // TODO: при подключении к реальной системе — проверять права пользователя в каждом действии.
-
-type Result<T = undefined> = { ok: true; data: T } | { ok: false; error: string }
-
-function fail(error: string): { ok: false; error: string } {
-  return { ok: false, error }
-}
 
 function revalidate() {
   revalidatePath("/team-reports", "layout")
@@ -63,6 +58,7 @@ export async function createTeamReportAction(
   if (!checked.ok) return checked
   const created = await store.insertTeamReport({
     ...checked.data,
+    status: "draft",
     reportAccess: "closed",
     hrbpReportAccess: "closed",
     reportEmailSent: false,
@@ -83,6 +79,8 @@ export async function updateTeamReportAction(
   if (!existing) return fail("Командный отчёт не найден")
   const checked = await check(input)
   if (!checked.ok) return checked
+  if (existing.status === "active" && !sameIds(existing.memberIds, checked.data.memberIds))
+    return fail("Добавлять и убирать сотрудников можно только в статусе «Черновик»")
   await store.updateTeamReport(id, (r) => Object.assign(r, checked.data))
   revalidate()
   return { ok: true, data: undefined }
@@ -98,6 +96,8 @@ export async function setTeamReportAccessAction(
 ): Promise<Result> {
   const existing = await store.getTeamReport(id)
   if (!existing) return fail("Командный отчёт не найден")
+  if (existing.status !== "active")
+    return fail("Показать отчёт можно только в статусе «Активный»")
   await store.updateTeamReport(id, (r) => {
     if (audience === "hrbp") {
       r.hrbpReportAccess = access
@@ -121,6 +121,7 @@ export async function duplicateTeamReportAction(id: string): Promise<Result<{ id
     hrbpIds: [...source.hrbpIds],
     memberIds: [...source.memberIds],
     groups: source.groups.map((g) => ({ ...g, memberIds: [...g.memberIds] })),
+    status: "draft",
     reportAccess: "closed",
     hrbpReportAccess: "closed",
     reportEmailSent: false,
@@ -131,6 +132,31 @@ export async function duplicateTeamReportAction(id: string): Promise<Result<{ id
   })
   revalidate()
   return { ok: true, data: { id: created.id } }
+}
+
+export async function setTeamReportStatusAction(
+  id: string,
+  status: TeamReportStatus,
+): Promise<Result> {
+  const existing = await store.getTeamReport(id)
+  if (!existing) return fail("Командный отчёт не найден")
+  if (status === "active" && existing.memberIds.length === 0)
+    return fail("Добавьте в команду хотя бы одного сотрудника перед активацией")
+  await store.updateTeamReport(id, (r) => {
+    r.status = status
+    if (status === "draft") {
+      r.reportAccess = "closed"
+      r.hrbpReportAccess = "closed"
+    }
+  })
+  revalidate()
+  return { ok: true, data: undefined }
+}
+
+function sameIds(left: string[], right: string[]) {
+  if (left.length !== right.length) return false
+  const ids = new Set(left)
+  return right.every((id) => ids.has(id))
 }
 
 export async function deleteTeamReportAction(id: string): Promise<Result> {

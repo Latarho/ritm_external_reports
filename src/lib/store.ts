@@ -41,41 +41,48 @@ async function readDb(): Promise<Db> {
     db.teamReports = buildTeamReportSeed(db.procedures)
     await writeDb(db)
   }
-  // Миграции старых записей командных отчётов.
-  let touched = false
-  for (const r of db.teamReports as Array<TeamReport & { leaderId?: string }>) {
-    if (!Array.isArray(r.hrbpIds)) {
-      r.hrbpIds = []
-      touched = true
-    }
-    if (!Array.isArray(r.leaderIds)) {
-      r.leaderIds = r.leaderId ? [r.leaderId] : []
-      delete r.leaderId
-      touched = true
-    }
-    if (r.hrbpReportAccess !== "open" && r.hrbpReportAccess !== "closed") {
-      r.hrbpReportAccess = "closed"
-      touched = true
-    }
-    if (!Array.isArray(r.groups)) {
-      r.groups = []
-      touched = true
-    }
-    if (!r.updatedBy) {
-      r.updatedBy = r.creator
-      touched = true
-    }
-    if (typeof r.reportEmailSent !== "boolean") {
-      r.reportEmailSent = false
-      touched = true
-    }
-    if (typeof r.hrbpEmailSent !== "boolean") {
-      r.hrbpEmailSent = false
-      touched = true
-    }
-  }
-  if (touched) await writeDb(db)
+  if (db.teamReports.some((report) => migrateTeamReport(report))) await writeDb(db)
   return db
+}
+
+/** Дополняет запись командного отчёта полями, которых не было в старых файлах. */
+function migrateTeamReport(report: TeamReport & { leaderId?: string }): boolean {
+  let touched = false
+  if (!Array.isArray(report.hrbpIds)) {
+    report.hrbpIds = []
+    touched = true
+  }
+  if (!Array.isArray(report.leaderIds)) {
+    report.leaderIds = report.leaderId ? [report.leaderId] : []
+    delete report.leaderId
+    touched = true
+  }
+  if (report.hrbpReportAccess !== "open" && report.hrbpReportAccess !== "closed") {
+    report.hrbpReportAccess = "closed"
+    touched = true
+  }
+  if (!Array.isArray(report.groups)) {
+    report.groups = []
+    touched = true
+  }
+  if (!report.updatedBy) {
+    report.updatedBy = report.creator
+    touched = true
+  }
+  if (typeof report.reportEmailSent !== "boolean") {
+    report.reportEmailSent = false
+    touched = true
+  }
+  if (typeof report.hrbpEmailSent !== "boolean") {
+    report.hrbpEmailSent = false
+    touched = true
+  }
+  if (report.status !== "draft" && report.status !== "active") {
+    report.status =
+      report.reportAccess === "open" || report.hrbpReportAccess === "open" ? "active" : "draft"
+    touched = true
+  }
+  return touched
 }
 
 async function writeDb(db: Db): Promise<void> {
@@ -100,6 +107,13 @@ function mutate<T>(fn: (db: Db) => T | Promise<T>): Promise<T> {
 
 function nextId(items: { id: string }[]): string {
   return String(items.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0) + 1)
+}
+
+function joinNames(ids: string[] | undefined, peopleById: Map<string, string>): string {
+  const names = (ids ?? [])
+    .map((id) => peopleById.get(id))
+    .filter((name): name is string => Boolean(name))
+  return names.length ? names.join(", ") : "—"
 }
 
 // ---------- Процедуры ----------
@@ -183,20 +197,15 @@ export async function listTeamReports(): Promise<TeamReportSummary[]> {
   )
   return db.teamReports.map((r) => {
     const procedure = procedures.get(r.procedureId)
-    const leaders = (r.leaderIds ?? [])
-      .map((id) => peopleById.get(id))
-      .filter((name): name is string => Boolean(name))
-    const hrbps = (r.hrbpIds ?? [])
-      .map((id) => peopleById.get(id))
-      .filter((name): name is string => Boolean(name))
     return {
       id: r.id,
       name: r.name,
       procedureId: r.procedureId,
       procedureName: procedure?.name ?? "—",
-      leaderName: leaders.length ? leaders.join(", ") : "—",
-      hrbpName: hrbps.length ? hrbps.join(", ") : "—",
+      leaderName: joinNames(r.leaderIds, peopleById),
+      hrbpName: joinNames(r.hrbpIds, peopleById),
       memberCount: r.memberIds.length,
+      status: r.status === "active" ? "active" : "draft",
       reportAccess: r.reportAccess,
       hrbpReportAccess: r.hrbpReportAccess ?? "closed",
       reportEmailSent: Boolean(r.reportEmailSent),

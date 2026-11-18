@@ -1,5 +1,8 @@
 export type ProcedureStatus = "draft" | "in_progress" | "completed"
 
+/** Черновик — состав команды можно менять. Активный — отчёт можно показать руководителю и сотруднику ДРП. */
+export type TeamReportStatus = "draft" | "active"
+
 /** Доступ участника к его отчёту. null — ссылка ещё не выдана / отчёта нет. */
 export type ReportAccess = "open" | "closed" | null
 
@@ -75,6 +78,7 @@ export interface TeamReport {
    * Пустой массив — без доп. группировки (одна команда + руководители).
    */
   groups: TeamComparisonGroup[]
+  status: TeamReportStatus
   /** доступ руководителей к отчёту */
   reportAccess: Exclude<ReportAccess, null>
   /** доступ сотрудника ДРП к отчёту */
@@ -98,6 +102,7 @@ export interface TeamReportSummary {
   leaderName: string
   hrbpName: string
   memberCount: number
+  status: TeamReportStatus
   reportAccess: Exclude<ReportAccess, null>
   hrbpReportAccess: Exclude<ReportAccess, null>
   reportEmailSent: boolean
@@ -128,4 +133,9 @@ export const STATUS_LABELS: Record<ProcedureStatus, string> = {
   draft: "Черновик",
   in_progress: "В процессе",
   completed: "Завершена",
+}
+
+export const TEAM_REPORT_STATUS_LABELS: Record<TeamReportStatus, string> = {
+  draft: "Черновик",
+  active: "Активный",
 }
